@@ -15,6 +15,7 @@ class Threaded {
     std::thread _thread;
     volatile bool _running = false;
     volatile bool _stopRequest = false;
+    unsigned int _consecutiveFailures = 0;
     void _threadFunction();
     size_t _parallels = 1;//if task is asynchronous allows running sub threads within thread.
 

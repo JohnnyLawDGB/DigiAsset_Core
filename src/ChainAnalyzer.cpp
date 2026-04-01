@@ -240,7 +240,6 @@ void ChainAnalyzer::shutdownFunction() {
 
 void ChainAnalyzer::phaseRewind() {
     Log* log = Log::GetInstance();
-    log->addMessage("Rewinding Phase Started");
 
     AppMain* main = AppMain::GetInstance();
     Database* db = main->getDatabase();
@@ -251,6 +250,7 @@ void ChainAnalyzer::phaseRewind() {
     //check if we need to rewind
     string hash = dgb->getBlockHash(_height);
     if (hash != _nextHash) {
+        log->addMessage("Rewinding Phase Started");
         _state = ChainAnalyzer::REWINDING;
 
         //rewind until correct

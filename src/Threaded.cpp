@@ -3,6 +3,7 @@
 //
 
 #include "Threaded.h"
+#include "Log.h"
 #include <future>
 
 using namespace std;
@@ -25,6 +26,20 @@ void Threaded::_threadFunction() {
             auto it = subThreads.begin();
             while (it != subThreads.end()) {
                 if (it->wait_for(chrono::seconds(0)) == future_status::ready) {
+                    try {
+                        it->get();
+                        _consecutiveFailures = 0;
+                    } catch (const exception& e) {
+                        _consecutiveFailures++;
+                        Log* log = Log::GetInstance();
+                        log->addMessage(string("Thread task exception: ") + e.what(), Log::ERROR);
+                        if (_consecutiveFailures > 3) {
+                            unsigned int delayMs = min(30000u, 1000u * _consecutiveFailures);
+                            log->addMessage("Backing off " + to_string(delayMs) + "ms after " +
+                                          to_string(_consecutiveFailures) + " consecutive failures", Log::WARNING);
+                            this_thread::sleep_for(chrono::milliseconds(delayMs));
+                        }
+                    }
                     it = subThreads.erase(it);
                 }
                 else {
@@ -37,7 +52,12 @@ void Threaded::_threadFunction() {
 
     //wait for all sub threads to be done
     for (auto& future: subThreads) {
-        future.wait();
+        try {
+            future.get();
+        } catch (const exception& e) {
+            Log* log = Log::GetInstance();
+            log->addMessage(string("Thread shutdown exception: ") + e.what(), Log::WARNING);
+        }
     }
 
     //shutdown
