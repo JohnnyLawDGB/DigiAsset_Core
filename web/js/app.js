@@ -29,6 +29,7 @@
   -------------------------------------------------------- */
   var _credentials = null;   // { username, password } — memory only, never persisted
   var _authed = false;
+  var _ready = false;        // true after initial auth — prevents routing before login
   var _syncState = null;
   var _version = null;
   var _modules = {};
@@ -71,7 +72,8 @@
         'Basic ' + btoa(_credentials.username + ':' + _credentials.password);
     }
 
-    return fetch('/', {
+    var rpcUrl = location.pathname.indexOf('/core') === 0 ? '/core/rpc' : '/';
+    return fetch(rpcUrl, {
       method: 'POST',
       headers: headers,
       body: body
@@ -233,6 +235,8 @@
   }
 
   function _handleRoute() {
+    if (!_ready) return; // Don't render until auth completes
+
     var parsed = parseHash();
     var route = parsed.route;
     var params = parsed.params;
@@ -476,16 +480,17 @@
       location.hash = '#/dashboard';
     }
 
-    // Defer initial route so modules have time to register
-    setTimeout(_handleRoute, 0);
-
-    // All DigiAsset Core RPC calls require auth — prompt immediately
+    // All DigiAsset Core RPC calls require auth — prompt before rendering anything
     showAuthModal().then(function () {
+      _ready = true;
       _startSyncPolling();
       _fetchVersion();
+      _handleRoute();
     }).catch(function () {
-      // User cancelled — start polling anyway (will show "Auth required")
+      // User cancelled — render anyway but polling will show errors
+      _ready = true;
       _startSyncPolling();
+      _handleRoute();
     });
   });
 
