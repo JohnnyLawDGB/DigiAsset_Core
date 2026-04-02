@@ -96,23 +96,33 @@
   function _renderCards(grid, sync, blockcount, ipfscount, version) {
     grid.textContent = '';
 
-    var syncHeight = sync ? (sync.height || sync.current || '—') : '—';
-    var syncState  = sync ? String(sync.state || sync.status || 'Unknown') : 'Unknown';
-    var syncPct    = sync && sync.percent !== undefined ? Math.round(sync.percent) + '%' : null;
+    // syncstate returns { count: <block_height>, sync: <int> }
+    // sync: 0=synced, negative=blocks behind, 1=stopped, 2=initializing, 3=rewinding, 4=optimizing
+    var syncHeight = sync ? Number(sync.count).toLocaleString() : '—';
+    var syncVal    = sync ? sync.sync : null;
+    var syncPct    = null; // not provided by API
+    var syncState  = 'Unknown';
+    if (sync !== null && sync !== undefined) {
+      if (syncVal === 0) syncState = 'Synced';
+      else if (syncVal < 0) syncState = Math.abs(syncVal).toLocaleString() + ' blocks behind';
+      else if (syncVal === 1) syncState = 'Stopped';
+      else if (syncVal === 2) syncState = 'Initializing';
+      else if (syncVal === 3) syncState = 'Rewinding';
+      else if (syncVal === 4) syncState = 'Optimizing';
+      else syncState = 'State: ' + syncVal;
+    }
 
     // Sync card
     var syncCard = _makeCard('Sync', '\u25A3');
     var syncBody = document.createElement('div');
     syncBody.className = 'card-body';
-    var syncVal = document.createElement('div');
-    syncVal.className = 'card-value';
-    syncVal.textContent = esc(syncHeight);
-    syncBody.appendChild(syncVal);
+    var syncHeightEl = document.createElement('div');
+    syncHeightEl.className = 'card-value';
+    syncHeightEl.textContent = syncHeight;
+    syncBody.appendChild(syncHeightEl);
     var syncDetail = document.createElement('div');
     syncDetail.className = 'card-label';
-    var detailStr = esc(syncState);
-    if (syncPct) detailStr += ' \u00B7 ' + esc(syncPct);
-    syncDetail.textContent = syncState + (syncPct ? ' \u00B7 ' + syncPct : '');
+    syncDetail.textContent = syncState;
     syncBody.appendChild(syncDetail);
     syncCard.appendChild(syncBody);
     grid.appendChild(syncCard);
@@ -174,13 +184,14 @@
   function _renderRates(wrap, rates) {
     wrap.textContent = '';
 
-    if (!rates || typeof rates !== 'object') {
+    // getexchangerates returns an array of on-chain exchange rate records:
+    // [{ address, height, index, value }, ...]
+    if (!rates || !Array.isArray(rates)) {
       wrap.textContent = 'Exchange rate data unavailable.';
       return;
     }
 
-    var entries = Object.entries(rates);
-    if (entries.length === 0) {
+    if (rates.length === 0) {
       wrap.textContent = 'No exchange rate data.';
       return;
     }
@@ -192,7 +203,7 @@
 
     var thead = document.createElement('thead');
     var hr = document.createElement('tr');
-    ['Currency', 'Rate'].forEach(function (col) {
+    ['Address', 'Height', 'Index', 'Value'].forEach(function (col) {
       var th = document.createElement('th');
       th.textContent = col;
       hr.appendChild(th);
@@ -201,15 +212,30 @@
     table.appendChild(thead);
 
     var tbody = document.createElement('tbody');
-    entries.forEach(function (entry) {
+    rates.forEach(function (record) {
       var tr = document.createElement('tr');
-      var tdCur = document.createElement('td');
-      tdCur.textContent = String(entry[0]).toUpperCase();
-      tr.appendChild(tdCur);
-      var tdRate = document.createElement('td');
-      tdRate.className = 'mono';
-      tdRate.textContent = esc(entry[1]);
-      tr.appendChild(tdRate);
+
+      // Address — truncated for display
+      var addr = String(record.address || '—');
+      var tdAddr = document.createElement('td');
+      tdAddr.className = 'mono';
+      tdAddr.textContent = addr.length > 20 ? addr.slice(0, 10) + '\u2026' + addr.slice(-6) : addr;
+      tdAddr.title = addr;
+      tr.appendChild(tdAddr);
+
+      var tdHeight = document.createElement('td');
+      tdHeight.textContent = esc(record.height !== undefined ? record.height : '—');
+      tr.appendChild(tdHeight);
+
+      var tdIndex = document.createElement('td');
+      tdIndex.textContent = esc(record.index !== undefined ? record.index : '—');
+      tr.appendChild(tdIndex);
+
+      var tdValue = document.createElement('td');
+      tdValue.className = 'mono';
+      tdValue.textContent = esc(record.value !== undefined ? record.value : '—');
+      tr.appendChild(tdValue);
+
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);

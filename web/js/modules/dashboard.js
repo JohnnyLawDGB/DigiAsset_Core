@@ -89,9 +89,21 @@
 
   function _loadDashboard(grid, recentWrap) {
     var sync = App.getSyncState();
-    var syncHeight = sync ? (sync.height || sync.current || '—') : '—';
-    var syncPct = sync && sync.percent !== undefined ? Math.round(sync.percent) + '%' : null;
-    var syncState = sync ? String(sync.state || sync.status || 'Unknown') : 'Unknown';
+    // syncstate returns { count: <block_height>, sync: <int> }
+    // sync: 0=synced, negative=blocks behind, 1=stopped, 2=initializing, 3=rewinding, 4=optimizing
+    var syncHeight = sync ? Number(sync.count).toLocaleString() : '—';
+    var syncVal = sync ? sync.sync : null;
+    var syncPct = null; // not provided by API
+    var syncState = 'Unknown';
+    if (sync !== null && sync !== undefined) {
+      if (syncVal === 0) syncState = 'Synced';
+      else if (syncVal < 0) syncState = Math.abs(syncVal).toLocaleString() + ' blocks behind';
+      else if (syncVal === 1) syncState = 'Stopped';
+      else if (syncVal === 2) syncState = 'Initializing';
+      else if (syncVal === 3) syncState = 'Rewinding';
+      else if (syncVal === 4) syncState = 'Optimizing';
+      else syncState = 'State: ' + syncVal;
+    }
 
     _renderSyncCard(grid, syncHeight, syncPct, syncState);
 

@@ -192,11 +192,16 @@
 
     var idx = parseInt(assetIndex, 10);
 
-    Promise.all([
-      App.rpc('getassetdata', [idx]),
-      App.rpc('getassetholders', [idx]).catch(function () { return null; }),
-      App.rpc('listassetissuances', [idx]).catch(function () { return null; })
-    ]).then(function (results) {
+    // getassetdata and getassetholders both take INTEGER assetIndex
+    // listassetissuances takes STRING assetId — fetch sequentially after asset data
+    App.rpc('getassetdata', [idx]).then(function (asset) {
+      var assetId = asset ? (asset.assetId || asset.assetid || '') : '';
+      return Promise.all([
+        Promise.resolve(asset),
+        App.rpc('getassetholders', [idx]).catch(function () { return null; }),
+        assetId ? App.rpc('listassetissuances', [assetId]).catch(function () { return null; }) : Promise.resolve(null)
+      ]);
+    }).then(function (results) {
       var asset = results[0];
       var holders = results[1];
       var issuances = results[2];
@@ -217,11 +222,21 @@
       var infoBody = document.createElement('div');
       infoBody.className = 'card-body detail-list';
 
+      // Asset name and description live under asset.ipfs.data
+      var ipfsData = (asset.ipfs && asset.ipfs.data) ? asset.ipfs.data : {};
+      var assetName = ipfsData.assetName || '—';
+      var assetDesc = ipfsData.description || '—';
+      // Issuer address lives under asset.issuer.address
+      var issuerAddr = (asset.issuer && asset.issuer.address) ? asset.issuer.address : '—';
+
       var fields = [
+        ['Name', assetName],
         ['Asset ID', asset.assetId || asset.assetid || '—'],
         ['Index', asset.assetIndex !== undefined ? asset.assetIndex : (asset.index !== undefined ? asset.index : idx)],
+        ['Issuer', issuerAddr],
         ['CID', asset.cid || asset.metaCid || '—'],
-        ['Height', asset.height !== undefined ? asset.height : '—']
+        ['Height', asset.height !== undefined ? asset.height : '—'],
+        ['Description', assetDesc]
       ];
       fields.forEach(function (f) {
         var row = document.createElement('div');
@@ -451,7 +466,9 @@
       table.className = 'data-table';
       var thead = document.createElement('thead');
       var hr = document.createElement('tr');
-      ['Asset ID', 'Index', 'Quantity'].forEach(function (col) {
+      // getaddressholdings returns object: { assetIndex: count, ... }
+      // keys are assetIndex values (as strings), values are quantities
+      ['Index', 'Quantity'].forEach(function (col) {
         var th = document.createElement('th');
         th.textContent = col;
         hr.appendChild(th);
@@ -461,42 +478,22 @@
 
       var tbody = document.createElement('tbody');
 
-      // holdings may be array or object
+      // Build entries from the object: key = assetIndex, value = quantity
       var entries = [];
-      if (Array.isArray(holdings)) {
-        holdings.forEach(function (h) {
-          entries.push({
-            assetId: h.assetId || h.assetid || '',
-            assetIndex: h.assetIndex !== undefined ? h.assetIndex : (h.index !== undefined ? h.index : ''),
-            quantity: h.quantity !== undefined ? h.quantity : h.qty || 0
-          });
-        });
-      } else {
-        Object.keys(holdings).forEach(function (k) {
-          var v = holdings[k];
-          entries.push({
-            assetId: typeof v === 'object' ? (v.assetId || k) : k,
-            assetIndex: typeof v === 'object' ? (v.assetIndex || '') : '',
-            quantity: typeof v === 'object' ? (v.quantity || v.qty || 0) : v
-          });
-        });
-      }
+      Object.entries(holdings).forEach(function (pair) {
+        entries.push({ assetIndex: pair[0], quantity: pair[1] });
+      });
 
       entries.forEach(function (entry) {
         var tr = document.createElement('tr');
 
-        var tdId = document.createElement('td');
-        var link = document.createElement('a');
-        link.href = '#/explorer/' + encodeURIComponent(String(entry.assetIndex || entry.assetId));
-        var idStr = String(entry.assetId);
-        link.textContent = idStr.length > 16 ? idStr.slice(0, 8) + '\u2026' + idStr.slice(-6) : idStr;
-        link.title = idStr;
-        link.className = 'mono';
-        tdId.appendChild(link);
-        tr.appendChild(tdId);
-
+        // Index cell — linked to asset detail
         var tdIdx = document.createElement('td');
-        tdIdx.textContent = esc(entry.assetIndex);
+        var link = document.createElement('a');
+        link.href = '#/explorer/' + encodeURIComponent(String(entry.assetIndex));
+        link.textContent = String(entry.assetIndex);
+        link.className = 'mono';
+        tdIdx.appendChild(link);
         tr.appendChild(tdIdx);
 
         var tdQty = document.createElement('td');

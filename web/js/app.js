@@ -157,7 +157,7 @@
     var prev = _credentials;
     _credentials = { username: username, password: password };
 
-    rpc('getbalance').then(function () {
+    rpc('syncstate').then(function () {
       _authed = true;
       _updateAuthButton();
       _hideAuthModal();
@@ -310,37 +310,33 @@
       var status = _deriveSyncStatus(result);
       elSyncDot.className = 'sync-dot ' + status.cls;
       elSyncText.textContent = status.text;
-    }).catch(function (err) {
-      if (err.code === 401) {
-        elSyncDot.className = 'sync-dot error';
-        elSyncText.textContent = 'Auth required';
-      } else {
-        elSyncDot.className = 'sync-dot error';
-        elSyncText.textContent = 'Offline';
-      }
+    }).catch(function () {
+      elSyncDot.className = 'sync-dot error';
+      elSyncText.textContent = _authed ? 'Offline' : 'Auth required';
     });
   }
 
+  // syncstate returns { count: <block_height>, sync: <int> }
+  // sync: 0 = synced, negative = blocks behind, 1 = stopped, 2 = initializing, 3 = rewinding, 4 = optimizing
   function _deriveSyncStatus(result) {
     if (!result) return { cls: 'error', text: 'No data' };
 
-    var state = String(result.state || result.status || '').toLowerCase();
+    var sync = result.sync;
+    var count = result.count;
 
-    if (state === 'synced' || state === 'synchronized') {
-      return { cls: 'synced', text: 'Synced' };
+    if (sync === 0) {
+      return { cls: 'synced', text: 'Synced \u2022 ' + Number(count).toLocaleString() };
     }
-    if (state === 'rewinding' || state === 'rewind') {
-      var h = result.height || result.current || '';
-      return { cls: 'rewinding', text: h ? 'Rewinding ' + h : 'Rewinding' };
+    if (sync < 0) {
+      var behind = Math.abs(sync);
+      return { cls: 'syncing', text: behind.toLocaleString() + ' blocks behind' };
     }
-    if (state === 'syncing' || state === 'synchronizing') {
-      var pct = result.percent !== undefined
-        ? Math.round(result.percent) + '%'
-        : String(result.height || '');
-      return { cls: 'syncing', text: pct ? 'Syncing ' + pct : 'Syncing\u2026' };
-    }
+    if (sync === 1) return { cls: 'error', text: 'Stopped' };
+    if (sync === 2) return { cls: 'syncing', text: 'Initializing\u2026' };
+    if (sync === 3) return { cls: 'rewinding', text: 'Rewinding\u2026' };
+    if (sync === 4) return { cls: 'syncing', text: 'Optimizing\u2026' };
 
-    return { cls: 'syncing', text: 'Syncing\u2026' };
+    return { cls: 'syncing', text: 'State: ' + sync };
   }
 
   function _startSyncPolling() {
@@ -352,12 +348,11 @@
      Version Fetch
   -------------------------------------------------------- */
 
+  // version RPC returns a string directly, e.g. "0.3.3.0"
   function _fetchVersion() {
-    rpc('getinfo').then(function (result) {
-      if (result && result.version !== undefined) {
-        _version = String(result.version);
-        elVersionText.textContent = 'v' + _version;
-      }
+    rpc('version').then(function (result) {
+      _version = String(result);
+      elVersionText.textContent = 'v' + _version;
     }).catch(function () {
       // Not critical
     });
@@ -481,11 +476,17 @@
       location.hash = '#/dashboard';
     }
 
-    _startSyncPolling();
-    _fetchVersion();
-
     // Defer initial route so modules have time to register
     setTimeout(_handleRoute, 0);
+
+    // All DigiAsset Core RPC calls require auth — prompt immediately
+    showAuthModal().then(function () {
+      _startSyncPolling();
+      _fetchVersion();
+    }).catch(function () {
+      // User cancelled — start polling anyway (will show "Auth required")
+      _startSyncPolling();
+    });
   });
 
   /* --------------------------------------------------------

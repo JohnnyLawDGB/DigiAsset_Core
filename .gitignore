@@ -10,3 +10,4 @@ src/Version.h
 tests/testFiles/assetTest.*
 tests/testFiles/rpcTest.db
 !*/.gitkeep
+.superpowers/

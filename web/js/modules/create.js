@@ -57,8 +57,8 @@
 
     // Warning banners
     var sync = App.getSyncState();
-    var syncState = sync ? String(sync.state || sync.status || '').toLowerCase() : '';
-    var isSynced = (syncState === 'synced' || syncState === 'synchronized');
+    // syncstate returns { count, sync } — sync === 0 means fully synced
+    var isSynced = sync ? (sync.sync === 0) : false;
 
     if (sync && !isSynced) {
       var syncWarn = _makeBanner('warning',
