@@ -12,6 +12,24 @@
     return d.innerHTML;
   }
 
+  // Resolve an asset-metadata media reference (typically "ipfs://<cid>") to a
+  // fetchable URL. The node does not expose an IPFS gateway through the proxy, so
+  // we resolve via a public IPFS gateway. The CID is validated to a safe charset
+  // before being placed in the URL (defense against injection from RPC-derived data).
+  function _ipfsToGateway(url) {
+    if (typeof url !== 'string' || !url) return '';
+    if (url.indexOf('http://') === 0 || url.indexOf('https://') === 0) return url;
+    var rest = url;
+    if (rest.indexOf('ipfs://') === 0) rest = rest.slice(7);
+    if (rest.indexOf('ipfs/') === 0) rest = rest.slice(5);
+    var slash = rest.indexOf('/');
+    var path = '';
+    if (slash >= 0) { path = rest.slice(slash); rest = rest.slice(0, slash); }
+    if (!/^[A-Za-z0-9]+$/.test(rest)) return '';        // validate CID charset
+    if (!/^[A-Za-z0-9/._-]*$/.test(path)) path = '';    // keep only safe path chars
+    return 'https://' + rest + '.ipfs.dweb.link' + path;
+  }
+
   // Parse sub-path segments after #/explorer
   // Returns an array of path segments
   function _getParams() {
@@ -277,6 +295,33 @@
       });
       supplyCard.appendChild(supplyBody);
       grid.appendChild(supplyCard);
+
+      // Media card — render the asset icon/image from ipfs.data.urls[] (if any)
+      var mediaUrls = Array.isArray(ipfsData.urls) ? ipfsData.urls : [];
+      var imgEntry = null;
+      for (var mi = 0; mi < mediaUrls.length; mi++) {
+        var u = mediaUrls[mi];
+        if (u && typeof u.mimeType === 'string' && u.mimeType.indexOf('image/') === 0) { imgEntry = u; break; }
+      }
+      if (!imgEntry && mediaUrls.length) imgEntry = mediaUrls[0];
+      var mediaSrc = imgEntry ? _ipfsToGateway(imgEntry.url) : '';
+      if (mediaSrc) {
+        var mediaCard = _makeCard('Media');
+        var mediaBody = document.createElement('div');
+        mediaBody.className = 'card-body';
+        var img = document.createElement('img');
+        img.alt = assetName + ' image';   // .alt is a property assignment — not HTML-parsed
+        img.loading = 'lazy';
+        img.style.maxWidth = '100%';
+        img.style.maxHeight = '320px';
+        img.style.borderRadius = '8px';
+        img.style.display = 'block';
+        img.addEventListener('error', function () { mediaCard.style.display = 'none'; });
+        img.src = mediaSrc;
+        mediaBody.appendChild(img);
+        mediaCard.appendChild(mediaBody);
+        grid.insertBefore(mediaCard, grid.firstChild);   // show the image first
+      }
 
       contentWrap.appendChild(grid);
 
