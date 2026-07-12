@@ -580,6 +580,7 @@ void DigiByteTransaction::addToDatabase() {
 
     //set to process all changes at once
     db->startTransaction();
+    try {
 
     //add special tx types
     switch (_txType) {
@@ -661,6 +662,14 @@ void DigiByteTransaction::addToDatabase() {
 
     //finalise changes
     db->endTransaction();
+    } catch (...) {
+        //A mid-transaction failure must not leave a dangling open transaction: because
+        //startTransaction/endTransaction are plain BEGIN/END, an un-rolled-back BEGIN
+        //would poison every subsequent block on retry (turning one transient error into
+        //a permanent sync wedge). Roll back and rethrow so the caller handles the error.
+        db->rollbackTransaction();
+        throw;
+    }
 }
 
 /**

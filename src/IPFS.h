@@ -62,7 +62,7 @@ public:
     //async requests
     void callOnDownload(const std::string& cid, const std::string& sync, const std::string& extra,
                         const std::string& callbackSymbol, unsigned int maxTime = 0);
-    std::promise<std::string>
+    std::future<std::string>
     callOnDownloadPromise(const std::string& cid, const std::string& sync = "", unsigned int maxTime = 0);
     std::string callOnDownloadSync(const std::string& cid, const std::string& sync = "", unsigned int maxTime = 0);
     void pin(const std::string& cid, unsigned int maxSize = 1); //1 is any size

@@ -727,6 +727,17 @@ void Database::endTransaction() {
 }
 
 /**
+ * Rolls back the current batch transaction. Safe to call even if no transaction is
+ * open (SQLite reports an error which we ignore) so it can be used unconditionally
+ * on an exception path. Frees any error message to avoid a leak.
+ */
+void Database::rollbackTransaction() {
+    char* zErrMsg = nullptr;
+    sqlite3_exec(_db, "ROLLBACK TRANSACTION", nullptr, nullptr, &zErrMsg);
+    if (zErrMsg != nullptr) sqlite3_free(zErrMsg);
+}
+
+/**
  * disables write verification.  gives significant speed increase but on power failure data
  * may not all be written to the drive so must recheck at startup
  */
@@ -2422,23 +2433,29 @@ using IPFSCallbackFunction = std::function<void(const std::string&, const std::s
                                                 bool failed)>;
 vector<tuple<string, string, IPFSCallbackFunction>> toDoLater;
 
-promise<string> Database::addIPFSJobPromise(const string& cid, const string& sync, unsigned int maxTime) {
-    promise<string> result;
+future<string> Database::addIPFSJobPromise(const string& cid, const string& sync, unsigned int maxTime) {
+    //Own the promise via a shared_ptr so it outlives this function and is kept alive by the
+    //registered callback. The previous version declared a local promise, captured it in the
+    //callback BY REFERENCE, then returned it BY VALUE (move) — leaving the callback holding a
+    //dangling reference, so the caller's future was never fulfilled and callOnDownloadSync
+    //blocked forever (leaking the calling/RPC thread).
+    auto result = std::make_shared<promise<string>>();
+    future<string> resultFuture = result->get_future();
 
     //add job to the database
     unsigned int jobIndex = addIPFSJob(cid, sync, "", maxTime, "_");
 
     //register callback function
-    _ipfsCallbacks["_" + to_string(jobIndex)] = [&](const string& cid, const string& extra, const string& content,
-                                                    bool failed) {
+    _ipfsCallbacks["_" + to_string(jobIndex)] = [result](const string& cid, const string& extra, const string& content,
+                                                          bool failed) {
         if (failed) {
-            result.set_exception(std::make_exception_ptr(IPFS::exceptionTimeout()));
+            result->set_exception(std::make_exception_ptr(IPFS::exceptionTimeout()));
         } else {
-            result.set_value(content);
+            result->set_value(content);
         }
     };
 
-    return result;
+    return resultFuture;
 }
 
 /*

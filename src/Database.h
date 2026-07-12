@@ -332,6 +332,7 @@ public:
     //performance related
     void startTransaction();
     void endTransaction();
+    void rollbackTransaction();
     void
     disableWriteVerification(); //on power failure not all commands may be written.  If using need to check at startup
 
@@ -472,7 +473,7 @@ public:
     void removeIPFSJob(unsigned int jobIndex, const std::string& sync);
     unsigned int addIPFSJob(const std::string& cid, const std::string& sync = "pin", const std::string& extra = "",
                             unsigned int maxSleep = 0, const std::string& callbackSymbol = "");
-    std::promise<std::string>
+    std::future<std::string>
     addIPFSJobPromise(const std::string& cid, const std::string& sync = "", unsigned int maxTime = 0);
     IPFSCallbackFunction& getIPFSCallback(const std::string& callbackSymbol);
     unsigned int getIPFSJobCount();
