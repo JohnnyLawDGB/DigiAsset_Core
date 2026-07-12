@@ -1,19 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
-project(digiasset_core-web)
 
-set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/modules)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
-set(CMAKE_CXX_STANDARD 17)
+# The legacy C++ RPC-documentation web server (web/main.cpp) was removed in favour
+# of the static built-in UI (index.html + css/ + js/ + img/), which is served
+# directly by an external web server / reverse proxy (e.g. nginx). There is nothing
+# to compile here; optionally install the static assets so `make install` can deploy
+# them. NONE disables the (unneeded) compiler/toolchain check for this subdirectory.
+project(digiasset_core_web NONE)
 
-
-set(HEADER_FILES
-        ../src/Config.h
-        )
-
-set(SOURCE_FILES
-        ../src/Config.cpp
-        )
-
-add_executable(digiasset_core-web main.cpp ${SOURCE_FILES} ${HEADER_FILES})
-
-install(TARGETS digiasset_core-web DESTINATION bin)
+install(FILES index.html DESTINATION bin/web)
+install(DIRECTORY css js img DESTINATION bin/web)
