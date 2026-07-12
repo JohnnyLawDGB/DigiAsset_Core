@@ -433,7 +433,10 @@ void Database::initializeClassValues() {
 
 
     //statement to insert new exchange rate
-    _stmtAddExchangeRate.prepare(_db, "INSERT INTO exchange VALUES (?,?,?,?);");
+    // OR REPLACE: a single block can contain multiple exchange-rate publishes from the
+    // same address (same address+index+height PK); last publish in the block wins. Also
+    // makes re-processing a block idempotent instead of throwing a UNIQUE constraint.
+    _stmtAddExchangeRate.prepare(_db, "INSERT OR REPLACE INTO exchange VALUES (?,?,?,?);");
 
     //statement to get current exchange rates(all rates)
     _stmtExchangeRatesAtHeight.prepare(_db, "WITH cte AS (\n"
