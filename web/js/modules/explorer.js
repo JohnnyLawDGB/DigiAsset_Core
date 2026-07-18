@@ -12,22 +12,50 @@
     return d.innerHTML;
   }
 
-  // Resolve an asset-metadata media reference (typically "ipfs://<cid>") to a
-  // fetchable URL. The node does not expose an IPFS gateway through the proxy, so
-  // we resolve via a public IPFS gateway. The CID is validated to a safe charset
-  // before being placed in the URL (defense against injection from RPC-derived data).
-  function _ipfsToGateway(url) {
-    if (typeof url !== 'string' || !url) return '';
-    if (url.indexOf('http://') === 0 || url.indexOf('https://') === 0) return url;
-    var rest = url;
-    if (rest.indexOf('ipfs://') === 0) rest = rest.slice(7);
-    if (rest.indexOf('ipfs/') === 0) rest = rest.slice(5);
-    var slash = rest.indexOf('/');
-    var path = '';
-    if (slash >= 0) { path = rest.slice(slash); rest = rest.slice(0, slash); }
-    if (!/^[A-Za-z0-9]+$/.test(rest)) return '';        // validate CID charset
-    if (!/^[A-Za-z0-9/._-]*$/.test(path)) path = '';    // keep only safe path chars
-    return 'https://' + rest + '.ipfs.dweb.link' + path;
+  var IMG_ATTEMPT_TIMEOUT_MS = 6000;
+
+  // Load an <img> across an ordered gateway list. Advance on 'error' OR a per-attempt
+  // timeout (guards a gateway that hangs and never fires 'error'). Call onExhausted()
+  // once every candidate has failed. Gateway URLs come from window.ipfsGateway.toList.
+  function _loadImageWithFallback(img, urls, onExhausted) {
+    if (!urls || !urls.length) { onExhausted(); return; }
+    var i = 0;
+    var timer = null;
+
+    function cleanup() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      img.removeEventListener('load', onLoad);
+      img.removeEventListener('error', onError);
+    }
+    function onLoad() { cleanup(); }                 // success — terminal
+    function onError() { cleanup(); advance(); }
+    function advance() {
+      i++;
+      if (i >= urls.length) { onExhausted(); return; }
+      attempt();
+    }
+    function attempt() {
+      img.addEventListener('load', onLoad);
+      img.addEventListener('error', onError);
+      timer = setTimeout(function () { cleanup(); advance(); }, IMG_ATTEMPT_TIMEOUT_MS);
+      img.src = urls[i];
+    }
+    attempt();
+  }
+
+  // Muted placeholder shown when an asset declares an image but no gateway served it.
+  function _makeImagePlaceholder(label) {
+    var ph = document.createElement('div');
+    ph.textContent = 'Image unavailable';
+    ph.setAttribute('role', 'img');
+    ph.setAttribute('aria-label', label || 'Image unavailable');
+    ph.style.padding = '24px';
+    ph.style.textAlign = 'center';
+    ph.style.color = 'var(--muted, #888)';
+    ph.style.fontSize = '0.9em';
+    ph.style.border = '1px dashed var(--border, #ccc)';
+    ph.style.borderRadius = '8px';
+    return ph;
   }
 
   // Parse sub-path segments after #/explorer
@@ -296,7 +324,8 @@
       supplyCard.appendChild(supplyBody);
       grid.appendChild(supplyCard);
 
-      // Media card — render the asset icon/image from ipfs.data.urls[] (if any)
+      // Media card — render the asset icon/image from ipfs.data.urls[] (if any),
+      // trying multiple IPFS gateways in order, falling back to a placeholder.
       var mediaUrls = Array.isArray(ipfsData.urls) ? ipfsData.urls : [];
       var imgEntry = null;
       for (var mi = 0; mi < mediaUrls.length; mi++) {
@@ -304,11 +333,12 @@
         if (u && typeof u.mimeType === 'string' && u.mimeType.indexOf('image/') === 0) { imgEntry = u; break; }
       }
       if (!imgEntry && mediaUrls.length) imgEntry = mediaUrls[0];
-      var mediaSrc = imgEntry ? _ipfsToGateway(imgEntry.url) : '';
-      if (mediaSrc) {
+      var gatewayUrls = imgEntry ? window.ipfsGateway.toList(imgEntry.url) : [];
+      if (imgEntry && gatewayUrls.length) {
         var mediaCard = _makeCard('Media');
         var mediaBody = document.createElement('div');
         mediaBody.className = 'card-body';
+
         var img = document.createElement('img');
         img.alt = assetName + ' image';   // .alt is a property assignment — not HTML-parsed
         img.loading = 'lazy';
@@ -316,9 +346,13 @@
         img.style.maxHeight = '320px';
         img.style.borderRadius = '8px';
         img.style.display = 'block';
-        img.addEventListener('error', function () { mediaCard.style.display = 'none'; });
-        img.src = mediaSrc;
         mediaBody.appendChild(img);
+
+        _loadImageWithFallback(img, gatewayUrls, function () {
+          if (img.parentNode === mediaBody) mediaBody.removeChild(img);
+          mediaBody.appendChild(_makeImagePlaceholder(assetName + ' image'));
+        });
+
         mediaCard.appendChild(mediaBody);
         grid.insertBefore(mediaCard, grid.firstChild);   // show the image first
       }
