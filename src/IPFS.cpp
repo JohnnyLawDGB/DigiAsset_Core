@@ -64,7 +64,10 @@ IPFS::IPFS(const string& configFile, bool runStart) {
     _timeoutDownload = config.getInteger("ipfstimeoutdownload", 3600);
     _timeoutRetry = config.getInteger("ipfstimeoutretry", 3600);
     setMaxParallels(config.getInteger("ipfsparallel", 10));
-    if (runStart) start();
+    if (runStart) {
+        AppMain::GetInstance()->getDatabase()->resetInProgressIPFSJobs(); //clear stale locks from a prior process before workers start
+        start();
+    }
 }
 
 /*

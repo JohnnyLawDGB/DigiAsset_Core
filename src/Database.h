@@ -477,6 +477,7 @@ public:
     addIPFSJobPromise(const std::string& cid, const std::string& sync = "", unsigned int maxTime = 0);
     IPFSCallbackFunction& getIPFSCallback(const std::string& callbackSymbol);
     unsigned int getIPFSJobCount();
+    void resetInProgressIPFSJobs();
 
     //DigiByte Domain table(these should only ever be called by DigiByteDomain.cpp
     void revokeDomain(const std::string& domain);

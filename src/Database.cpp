@@ -84,7 +84,7 @@ void Database::buildTables(unsigned int dbVersionNumber) {
                         "INSERT INTO \"flags\" VALUES (\"wasPrunedUTXOHistory\",-1);"
                         "INSERT INTO \"flags\" VALUES (\"wasPrunedVoteHistory\",-1);"
                         "INSERT INTO \"flags\" VALUES (\"wasPrunedNonAssetUTXOHistory\",0);"
-                        "INSERT INTO \"flags\" VALUES (\"dbVersion\",6);"
+                        "INSERT INTO \"flags\" VALUES (\"dbVersion\",7);"
 
                         "CREATE TABLE \"kyc\" (\"address\" TEXT NOT NULL, \"country\" TEXT NOT NULL, \"name\" TEXT NOT NULL, \"hash\" BLOB NOT NULL, \"height\" INTEGER NOT NULL, \"revoked\" INTEGER, PRIMARY KEY(\"address\"));"
 
@@ -98,6 +98,7 @@ void Database::buildTables(unsigned int dbVersionNumber) {
                         "CREATE TABLE \"ipfs\" (\"jobIndex\" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, \"sync\" TEXT NOT NULL, \"lock\" BOOL NOT NULL, \"cid\" TEXT NOT NULL, \"extra\" TEXT, \"callback\" TEXT NOT NULL, \"pause\" INTEGER, \"maxTime\" INTEGER);"
                         "INSERT INTO \"ipfs\" VALUES (1,'pin',false,'QmfSVLAntanDUKrEHUnTXRh53GLUBHFfxk5x6LH4zz9PM4','','',NULL,NULL);" //DigiByte Native Coin data
                         "INSERT INTO \"ipfs\" VALUES (2,'pin',false,'QmSAcz2H7veyeuuSyACLkSj9ts9EWm1c9v7uTqbHynsVbj','','',NULL,NULL);" //DigiByte Logo
+                        "CREATE UNIQUE INDEX idx_ipfs_pin_dedup ON ipfs(cid, sync) WHERE sync IN ('pin','unpin');"
 
                         //PSP tables
                         "CREATE TABLE \"pspFiles\" (\"cid\" TEXT NOT NULL,\"poolIndex\");"
@@ -165,6 +166,24 @@ void Database::buildTables(unsigned int dbVersionNumber) {
                                   "CREATE TABLE \"unknown\" (\"txid\" BLOB NOT NULL, \"data\" BLOB NOT NULL);"
                                   "CREATE TABLE \"encryptedkeys\" (\"address\" TEXT NOT NULL, \"data\" BLOB NOT NULL, PRIMARY KEY(\"address\"));"
                                   "UPDATE \"flags\" set \"value\"=6 WHERE \"key\"=\"dbVersion\";"
+                                  "COMMIT;";
+                rc = sqlite3_exec(_db, sql, Database::defaultCallback, nullptr, &zErrMsg);
+                if (rc != SQLITE_OK) {
+                    sqlite3_free(zErrMsg);
+                    throw exceptionFailedToCreateTable();
+                }
+            },
+
+            //Define what is changed from version 6 to version 7 (IPFS pin-queue dedup)
+            [&]() {
+                char* zErrMsg = nullptr;
+                int rc;
+                //Must DELETE dups BEFORE CREATE UNIQUE INDEX or the index build fails.
+                const char* sql = "BEGIN TRANSACTION;"
+                                  "UPDATE ipfs SET lock=false WHERE lock=true;"
+                                  "DELETE FROM ipfs WHERE sync IN ('pin','unpin') AND jobIndex NOT IN (SELECT MIN(jobIndex) FROM ipfs WHERE sync IN ('pin','unpin') GROUP BY cid, sync);"
+                                  "CREATE UNIQUE INDEX idx_ipfs_pin_dedup ON ipfs(cid, sync) WHERE sync IN ('pin','unpin');"
+                                  "UPDATE \"flags\" set \"value\"=7 WHERE \"key\"=\"dbVersion\";"
                                   "COMMIT;";
                 rc = sqlite3_exec(_db, sql, Database::defaultCallback, nullptr, &zErrMsg);
                 if (rc != SQLITE_OK) {
@@ -515,7 +534,7 @@ void Database::initializeClassValues() {
     _stmtClearNextIPFSJob_a.prepare(_db, "DELETE FROM ipfs WHERE jobIndex=?;");
     _stmtClearNextIPFSJob_b.prepare(_db, "UPDATE ipfs set lock=false WHERE sync=?;");
 
-    _stmtInsertIPFSJob.prepare(_db, "INSERT INTO ipfs (sync, lock, cid, extra, callback, pause, maxTime) VALUES (?,false,?,?,?,?,?);");
+    _stmtInsertIPFSJob.prepare(_db, "INSERT OR IGNORE INTO ipfs (sync, lock, cid, extra, callback, pause, maxTime) VALUES (?,false,?,?,?,?,?);");
 
     _stmtSetIPFSPauseSync.prepare(_db, "UPDATE ipfs set pause=?, lock=false WHERE sync=?;");
 
@@ -546,9 +565,9 @@ void Database::initializeClassValues() {
 
     _stmtIsInPermanent.prepare(_db, "SELECT 1 FROM pspFiles WHERE cid=?");
 
-    _stmtRepinAssets.prepare(_db, "INSERT INTO ipfs (sync, lock, cid, extra, callback, pause, maxTime) SELECT 'pin', 0, cid, '', '', NULL, NULL FROM assets WHERE cid != '';");
+    _stmtRepinAssets.prepare(_db, "INSERT OR IGNORE INTO ipfs (sync, lock, cid, extra, callback, pause, maxTime) SELECT 'pin', 0, cid, '', '', NULL, NULL FROM assets WHERE cid != '';");
 
-    _stmtRepinPermanentSpecific.prepare(_db, "INSERT INTO ipfs (sync, lock, cid, extra, callback, pause, maxTime) SELECT 'pin', 0, cid, '', '', NULL, NULL FROM pspFiles WHERE \"poolIndex\" = ?;");
+    _stmtRepinPermanentSpecific.prepare(_db, "INSERT OR IGNORE INTO ipfs (sync, lock, cid, extra, callback, pause, maxTime) SELECT 'pin', 0, cid, '', '', NULL, NULL FROM pspFiles WHERE \"poolIndex\" = ?;");
 
     _stmtAddAssetToPool.prepare(_db, "INSERT OR IGNORE INTO pspAssets (assetIndex,poolIndex) VALUES (?,?);");
 
@@ -2605,7 +2624,7 @@ void Database::unpinPermanent(unsigned int poolIndex) {
         }
     }
 
-    string sql = "INSERT INTO ipfs (sync, lock, cid, extra, callback, pause, maxTime) SELECT 'unpin', 0, cid, '', '', NULL, NULL FROM pspFiles WHERE \"poolIndex\" = ?";
+    string sql = "INSERT OR IGNORE INTO ipfs (sync, lock, cid, extra, callback, pause, maxTime) SELECT 'unpin', 0, cid, '', '', NULL, NULL FROM pspFiles WHERE \"poolIndex\" = ?";
     if (subscribedToAny) {
         sql += " AND \"cid\" NOT IN (SELECT \"cid\" FROM pspFiles WHERE ";
         for (const auto& pool: *pools) {
@@ -2623,6 +2642,21 @@ void Database::unpinPermanent(unsigned int poolIndex) {
     if (rc != SQLITE_DONE) {
         handleSpecialErrors(__LINE__);
         throw exceptionFailedInsert();
+    }
+}
+
+/**
+ * Clears stale IPFS job locks left by a previously-killed process. Called at IPFS
+ * handler startup, before any worker thread runs, so it cannot clobber a live lock.
+ * Non-fatal: a failure here must not prevent the node from starting.
+ */
+void Database::resetInProgressIPFSJobs() {
+    char* zErrMsg = nullptr;
+    int rc = sqlite3_exec(_db, "UPDATE ipfs SET lock=false WHERE lock=true;", nullptr, nullptr, &zErrMsg);
+    if (rc != SQLITE_OK) {
+        Log* log = Log::GetInstance();
+        log->addMessage(string("resetInProgressIPFSJobs failed: ") + (zErrMsg ? zErrMsg : "unknown"), Log::WARNING);
+        if (zErrMsg != nullptr) sqlite3_free(zErrMsg);
     }
 }
 
