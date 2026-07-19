@@ -1,7 +1,7 @@
 # IPFS Pin-Queue Dedup + Cleanup — Design Spec
 
 **Date:** 2026-07-12
-**Status:** Approved
+**Status:** Implemented + **deployed to prod 2026-07-19** (fork `development` commit `32f8c21`). Verified: `dbVersion=7`, `idx_ipfs_pin_dedup` created, restart collapsed 5,335 assets → 4,541 distinct pins (queue structurally capped, no more 106k rebuild), sync healthy at tip. Plan: `docs/superpowers/plans/2026-07-19-ipfs-pin-queue-dedup.md`.
 **Related:** DigiScope missing-asset-images investigation; follows the sync-wedge fix (`c29ecda`) and the getassetdata-hang fix (`03fd0dd`).
 
 ## Problem

@@ -1,7 +1,7 @@
 # Built-in Explorer — IPFS Image Gateway Fallback
 
 **Date:** 2026-07-18
-**Status:** Design approved, pending spec review
+**Status:** Implemented on fork `development` (commits `f07eb9f`, `754399b`), pushed to origin. **Not yet deployed** to prod `/core/`. Plan: `docs/superpowers/plans/2026-07-18-explorer-ipfs-gateway-fallback.md`.
 **Component:** `web/js/modules/explorer.js` (built-in UI in this repo)
 
 ## Background
